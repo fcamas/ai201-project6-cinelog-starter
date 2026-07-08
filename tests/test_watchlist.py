@@ -165,3 +165,22 @@ def test_remove_from_watchlist_nonexistent_raises(app, sample_user, sample_film)
     with app.app_context():
         with pytest.raises(NotInWatchlistError):
             remove_from_watchlist(user_id=sample_user, film_id=sample_film)
+
+
+# ── Visibility toggle (stretch) ───────────────────────────────────────────────
+
+def test_add_to_watchlist_respects_public_false(app, sample_user, sample_film):
+    """
+    add_to_watchlist() should honor an explicit public=False override
+    instead of always falling back to the public=True default.
+    """
+    with app.app_context():
+        entry = add_to_watchlist(
+            user_id=sample_user, film_id=sample_film, public=False
+        )
+        assert entry.public is False
+
+        in_db = WatchlistEntry.query.filter_by(
+            user_id=sample_user, film_id=sample_film
+        ).first()
+        assert in_db.public is False
