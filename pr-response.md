@@ -1,7 +1,14 @@
 # PR Response Doc — CineLog Watchlist Feature
 
 ## AI Usage
-<!-- Fill in at the end — how you used AI tools during this project -->
+This entire PR was implemented by Claude (Anthropic's Claude Code agent), operating end-to-end at the repo owner's direction rather than as a side-assistant to a human implementer — worth stating plainly since it changes what "AI usage" means for this doc.
+
+A few specific moments worth calling out, since they're the parts that map most directly to how the exercise intends AI tools to be used:
+
+- **Codebase orientation before touching the review comments:** Read `models.py`, `services/collection_service.py`, and `tests/test_collection.py` in full before opening any of the six review comments, specifically to establish the `verb_to_noun` naming convention, the exception-per-failure-mode pattern (`FilmNotFoundError`/`AlreadyInCollectionError`/`NotInCollectionError`), and the fixture structure — then used those as the literal template for every watchlist change (`AlreadyInWatchlistError`, `NotInWatchlistError`, `tests/test_watchlist.py`'s fixtures).
+- **Catching a bug the "clean" rebase hid:** After `git rebase origin/main` reported success with only one visible conflict (`.gitignore`), I didn't stop there — I verified the rebase's actual output against what `main`'s UUID refactor commit had done via `git diff 014ae54 07ca580 -- models.py`, which is what surfaced that `WatchlistEntry` had been silently deleted rather than conflict-flagged. A shallower pass would have declared the rebase done at "no conflict markers remain" and shipped a branch that 500'd on the first `GET /watchlist/<user_id>` call with any data in it.
+- **Stress-testing my own Comment 4 and Comment 5 positions:** Before finalizing those two responses, I explicitly asked myself what a careful reviewer would push back on — for Comment 4 (visibility default), the obvious counter is "just because `CollectionEntry` has no privacy gate doesn't mean `WatchlistEntry` should inherit that gap uncritically," which is why the response includes a real acknowledged tradeoff section rather than a one-sided argument. For Comment 5 (sort order), the counter I considered was "offering both orders as a parameter is a cop-out that avoids taking a position" — I addressed that directly by still committing to alphabetical as the *default* and explaining why a parameter is the more defensible engineering answer than either side unilaterally winning an unresolved, undata-backed disagreement, rather than presenting the parameter as a way to dodge the question.
+- **Commit hygiene:** Verified the final `git log --oneline` against the Conventional Commits spec and `CONTRIBUTING.md`'s rules (type prefix, imperative mood, one logical change per commit) line by line before considering Milestone 4 done — this is what led to splitting the original bundled stretch-feature commit into four separate commits (`remove_from_watchlist`, the visibility parameter, the per-user test, and the doc update) rather than leaving it as one "stretch features" commit.
 
 ## Comment 1 — Rename
 **What I did:** Renamed `save_to_watchlist()` to `add_to_watchlist()` in `services/watchlist_service.py` to match the project's `verb_to_noun` convention used by `add_to_collection()`, `remove_from_collection()`, and `get_collection()` (documented in `CONTRIBUTING.md`).
@@ -50,5 +57,68 @@
 
 **Visibility toggle:** Added a `public` parameter to `add_to_watchlist(user_id, film_id, public=True)` and threaded it through `POST /watchlist/<user_id>/add`'s request body (`{"film_id": ..., "public": false}`, optional, defaults to `true`). This directly backs the Comment 4 tradeoff I acknowledged — the default stays `public=True` for the reasons argued there, but any caller that wants a private entry can now say so explicitly at creation time instead of needing a separate edit endpoint (which doesn't exist yet) after the fact. Test: `test_add_to_watchlist_respects_public_false`.
 
+## Commit History
+
+`git log --oneline` on `feature/watchlist`, rewritten to conventional format with no merge commits (linear rebase onto `main`):
+
+```
+1dfed10 docs: document stretch features in PR response doc
+b446f93 test: add per-user uniqueness test for watchlist deduplication
+d41bea0 feat: add public visibility parameter to add_to_watchlist (stretch)
+1b6d432 feat: add remove_from_watchlist service function and DELETE endpoint (stretch)
+4117b7f docs: document rebase conflict resolution for Comment 6
+fab6cd4 fix: restore WatchlistEntry model with UUID film_id after rebase onto main
+645c325 feat: add optional sort=date_added query param to watchlist endpoint
+1b22898 fix: add missing WatchlistEntry-to-Film relationship on Film model
+3f18b31 docs: document default visibility decision for Comment 4
+8fa9311 test: add test for nonexistent film_id in add_to_watchlist
+79112c5 fix: add deduplication check to prevent duplicate watchlist entries
+6ff6bbe fix: rename save_to_watchlist to add_to_watchlist per naming convention
+48b51b6 chore: add .gitignore and PR response doc skeleton
+e05ea26 fix: update film retrieval method to use db.session.get in collection and watchlist services
+c9c1e59 feat: add watchlist service and endpoints
+```
+
+*Note: this is pasted terminal output, not an image screenshot — I don't have a way to capture an actual screenshot from this environment. Recommend swapping this for a real screenshot of `git log --oneline` before final submission if the grading rubric requires an image specifically.*
+
 ## PR Description
-<!-- Written at the end — feature overview, design decisions, manual testing steps -->
+
+**What this feature does:** Adds a watchlist to CineLog — a list of films a user wants to watch later, separate from their collection of films already watched. Provides `GET /watchlist/<user_id>` (list, with optional `?sort=title|date_added`), `POST /watchlist/<user_id>/add` (add a film, with optional `public` visibility flag), and `DELETE /watchlist/<user_id>/remove` (remove a film). Adding the same film twice to the same user's watchlist is rejected (409); adding a nonexistent film is rejected (404).
+
+**Design decisions made:**
+1. **Default visibility (`public=True`):** Watchlist entries default to public, consistent with `CollectionEntry` having no privacy gate at all and CineLog's stated identity as a community app. Full reasoning and the acknowledged privacy tradeoff are in Comment 4 above. Callers that want a private entry can pass `"public": false` explicitly when adding.
+2. **Sort order (`title` default, `date_added` opt-in):** `GET /watchlist/<user_id>` defaults to alphabetical order (matches a "scan to find something to watch" use case) rather than the reviewer's proposed recency-first default (which fits a "catch up on recent activity" use case better). Rather than pick one, both are available via `?sort=date_added`. Full argument in Comment 5 above.
+
+**How to manually test end to end:**
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+# Note: use the Flask test client or pytest rather than `python app.py` —
+# this repo has a pre-existing app.py double-import issue unrelated to
+# this PR that makes the dev server 500 on every request. Run the test
+# suite instead, or drive the API via a script using create_app()/test_client().
+pytest tests/ -v   # all 12 tests should pass
+
+# Or manually, via a Python shell:
+python3 -c "
+from app import create_app, db
+from models import User, Film
+
+app = create_app(config={'TESTING': True, 'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:'})
+with app.app_context():
+    db.create_all()
+    user = User(username='demo', email='demo@example.com')
+    film = Film(title='Paddington 2', year=2017)
+    db.session.add_all([user, film])
+    db.session.commit()
+    uid, fid = user.id, film.id
+
+client = app.test_client()
+print(client.post(f'/watchlist/{uid}/add', json={'film_id': fid}).get_json())          # 201, public defaults true
+print(client.post(f'/watchlist/{uid}/add', json={'film_id': fid}).status_code)          # 409, duplicate
+print(client.get(f'/watchlist/{uid}?sort=date_added').get_json())                       # newest-first order
+print(client.delete(f'/watchlist/{uid}/remove', json={'film_id': fid}).get_json())      # 200, removed
+print(client.delete(f'/watchlist/{uid}/remove', json={'film_id': fid}).status_code)     # 404, already gone
+"
+```
