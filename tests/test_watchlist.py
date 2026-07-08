@@ -102,3 +102,36 @@ def test_add_to_watchlist_nonexistent_film_raises(app, sample_user):
 
         with pytest.raises(FilmNotFoundError):
             add_to_watchlist(user_id=sample_user, film_id=fake_film_id)
+
+
+# ── Sort order (Comment 5) ────────────────────────────────────────────────────
+
+def test_get_watchlist_sort_order(app, sample_user):
+    """
+    get_watchlist() defaults to alphabetical (title) order, and accepts
+    sort_by="date_added" for most-recently-added-first order. See Comment 5
+    in pr-response.md for why both are offered instead of a single default.
+    """
+    with app.app_context():
+        from datetime import datetime, timezone, timedelta
+
+        film_z = Film(title="Zzz Film", year=2020)
+        film_a = Film(title="Aaa Film", year=2021)
+        db.session.add_all([film_z, film_a])
+        db.session.commit()
+
+        earlier = datetime.now(timezone.utc) - timedelta(days=5)
+        later = datetime.now(timezone.utc)
+
+        # Aaa added earlier, Zzz added later — alphabetical and date-added
+        # order disagree, so this actually distinguishes the two sort modes.
+        entry_a = WatchlistEntry(user_id=sample_user, film_id=film_a.id, date_added=earlier)
+        entry_z = WatchlistEntry(user_id=sample_user, film_id=film_z.id, date_added=later)
+        db.session.add_all([entry_a, entry_z])
+        db.session.commit()
+
+        alphabetical = get_watchlist(sample_user)
+        assert [f["title"] for f in alphabetical] == ["Aaa Film", "Zzz Film"]
+
+        newest_first = get_watchlist(sample_user, sort_by="date_added")
+        assert [f["title"] for f in newest_first] == ["Zzz Film", "Aaa Film"]

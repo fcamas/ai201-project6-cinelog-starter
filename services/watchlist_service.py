@@ -47,23 +47,28 @@ def add_to_watchlist(user_id, film_id):
     return entry
 
 
-def get_watchlist(user_id):
+def get_watchlist(user_id, sort_by="title"):
     """
     Return all films on a user's watchlist.
 
     Args:
         user_id (str): UUID of the user.
+        sort_by (str): "title" (default, alphabetical) or "date_added"
+                        (most recently added first). See Comment 5 in
+                        pr-response.md for the reasoning behind offering
+                        both instead of picking a single default.
 
     Returns:
         list[dict]: List of film dicts with watchlist metadata attached.
     """
-    entries = (
-        WatchlistEntry.query
-        .filter_by(user_id=user_id)
-        .join(Film)
-        .order_by(Film.title.asc())
-        .all()
-    )
+    query = WatchlistEntry.query.filter_by(user_id=user_id).join(Film)
+
+    if sort_by == "date_added":
+        query = query.order_by(WatchlistEntry.date_added.desc())
+    else:
+        query = query.order_by(Film.title.asc())
+
+    entries = query.all()
 
     result = []
     for entry in entries:
