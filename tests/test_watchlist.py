@@ -184,3 +184,29 @@ def test_add_to_watchlist_respects_public_false(app, sample_user, sample_film):
             user_id=sample_user, film_id=sample_film
         ).first()
         assert in_db.public is False
+
+
+# ── Edge case: per-user uniqueness (second test, not requested by the review) ─
+
+def test_add_to_watchlist_different_users_same_film_both_succeed(app, sample_film):
+    """
+    Two different users should each be able to add the same film to their
+    own watchlists — deduplication (Comment 2) must be scoped per-user, not
+    global. Chose this edge case because the dedup fix in Comment 2 queries
+    on (user_id, film_id) together, and it's easy to accidentally scope a
+    "has this been added already" check to film_id alone — which would
+    incorrectly block a second user from watchlisting a film someone else
+    already saved.
+    """
+    with app.app_context():
+        user_a = User(username="user_a", email="a@example.com")
+        user_b = User(username="user_b", email="b@example.com")
+        db.session.add_all([user_a, user_b])
+        db.session.commit()
+
+        entry_a = add_to_watchlist(user_id=user_a.id, film_id=sample_film)
+        entry_b = add_to_watchlist(user_id=user_b.id, film_id=sample_film)
+
+        assert entry_a.id != entry_b.id
+        count = WatchlistEntry.query.filter_by(film_id=sample_film).count()
+        assert count == 2
