@@ -14,8 +14,9 @@
 **How I verified:** Used the Flask test client (not the dev server — see note in Comment 6/environment about a pre-existing `app.py` double-import bug unrelated to this change) to add a film, then call `add_to_watchlist` again for the same user/film. First call returned `201`; second returned `409` with the expected error message. Also called with a nonexistent `film_id` to confirm the previously-silent 500 path now returns a clean `404`. Ran `pytest tests/ -v` — all 4 existing collection tests still pass.
 
 ## Comment 3 — Missing test
-**What I did:**
-**How I verified:**
+**What I did:** Created `tests/test_watchlist.py`, using `tests/test_collection.py` as the direct model — same `app`/`sample_user`/`sample_film` fixture structure, same in-memory SQLite config. I wrote `test_add_to_watchlist_nonexistent_film_raises`, the specific test requested in the comment, modeled line-for-line on `test_add_to_collection_nonexistent_film_raises` (same fake-UUID sentinel, same `pytest.raises(FilmNotFoundError)` pattern). I also included `test_add_to_watchlist_creates_entry` (happy path) and `test_add_to_watchlist_duplicate_raises` (dedup from Comment 2), since `CONTRIBUTING.md` states new service functions need all three test categories — happy path, duplicate/conflict, nonexistent ID — and `test_collection.py` already establishes that as the working precedent for this codebase, not just a guideline.
+
+**How I verified:** Ran `pytest tests/test_watchlist.py -v` — all 3 tests pass. Then ran the full suite (`pytest tests/ -v`) to confirm the new file doesn't interfere with `test_collection.py`'s fixtures or tests (each test file gets its own isolated in-memory DB per the `app` fixture's `create_all`/`drop_all` lifecycle, so there's no cross-file state).
 
 ## Comment 4 — Default visibility
 **My position:**
